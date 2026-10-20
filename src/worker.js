@@ -104,9 +104,15 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/api/health") {
-      return request.method === "GET"
-        ? json({ success: true, service: "vebora-leads" })
-        : json({ success: false, message: "Используйте GET." }, 405);
+      if (request.method !== "GET") {
+        return json({ success: false, message: "Используйте GET." }, 405);
+      }
+      try {
+        await env.DB.prepare("SELECT 1 FROM leads LIMIT 1").first();
+        return json({ success: true, service: "vebora-leads", database: "connected" });
+      } catch {
+        return json({ success: false, message: "База данных недоступна." }, 503);
+      }
     }
     if (url.pathname === "/api/leads") return submitLead(request, env, url);
     return env.ASSETS.fetch(request);
