@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vebora1",
+  "main": "./src/worker.js",
+  "compatibility_date": "2026-10-19",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vebora-leads",
+      "database_id": "573a379a-be00-43a2-8fbe-237fb2279e39",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
