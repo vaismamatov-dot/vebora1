@@ -7,6 +7,9 @@ const SITE_TYPES = new Set([
 ]);
 const PLANS = new Set(["", "START", "PRO", "PREMIUM"]);
 const MAX_BODY_BYTES = 16_384;
+const MIN_FORM_AGE_MS = 2_500;
+const MAX_FORM_AGE_MS = 24 * 60 * 60 * 1000;
+const RATE_LIMIT = new Map();
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -77,10 +80,26 @@ async function submitLead(request, env, url) {
   }
   let lead;
   try {
+    if (typeof payload.website !== "string" || payload.website.trim()) {
+      return json({ success: false, message: "Запрос отклонён." }, 400);
+    }
+    const formAge = Date.now() - Number(payload.formStartedAt);
+    if (!Number.isFinite(formAge) || formAge < MIN_FORM_AGE_MS || formAge > MAX_FORM_AGE_MS) {
+      return json({ success: false, message: "Форма отправлена слишком быстро. Обновите страницу и попробуйте снова." }, 400);
+    }
     lead = validate(payload);
   } catch (error) {
     return json({ success: false, message: error.message }, 400);
   }
+  const now = Date.now();
+  for (const [key, window] of RATE_LIMIT) if (now - window.startedAt > 60_000) RATE_LIMIT.delete(key);
+  const clientKey = request.headers.get("CF-Connecting-IP") || "unknown";
+  const attempt = RATE_LIMIT.get(clientKey);
+  if (attempt && now - attempt.startedAt < 60_000 && attempt.count >= 3) {
+    return json({ success: false, message: "Слишком много заявок. Подождите минуту." }, 429);
+  }
+  if (!attempt || now - attempt.startedAt >= 60_000) RATE_LIMIT.set(clientKey, { startedAt: now, count: 1 });
+  else attempt.count += 1;
   try {
     const result = await env.DB.prepare(
       "INSERT INTO leads (name, business, site_type, budget, task, contact, plan) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -94,7 +113,32 @@ async function submitLead(request, env, url) {
       lead.plan,
     ).run();
     if (!result.success) throw new Error("D1 did not confirm the insert");
-    return json({ success: true, id: result.meta?.last_row_id ?? null }, 201);
+    let notificationStatus = "not_configured";
+    if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
+      try {
+        const message = [
+          "Новая заявка VEBORA",
+          `Имя: ${lead.name}`,
+          `Бизнес: ${lead.business || "не указано"}`,
+          `Тип: ${lead.siteType}`,
+          `Бюджет: ${lead.budget || "не указан"}`,
+          `Тариф: ${lead.plan || "не выбран"}`,
+          `Контакт: ${lead.contact}`,
+          `Задача: ${lead.task}`,
+        ].join("\n");
+        const telegramResponse = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        notificationStatus = telegramResponse.ok ? "sent" : "failed";
+      } catch {
+        notificationStatus = "failed";
+      }
+    }
+    while (RATE_LIMIT.size > 5_000) RATE_LIMIT.delete(RATE_LIMIT.keys().next().value);
+    return json({ success: true, saved: true, id: result.meta?.last_row_id ?? null, notificationStatus }, 201);
   } catch {
     return json({ success: false, message: "Не удалось сохранить заявку. Попробуйте позже." }, 500);
   }

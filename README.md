@@ -1,30 +1,45 @@
-# VEBORA — сайт студии
+# VEBORA DIGITAL STUDIO
 
-Адаптивный одностраничный сайт на HTML, CSS, JavaScript и Bootstrap 5. Для локальной проверки формы запускайте `python server.py` и открывайте `http://127.0.0.1:8000`; сервер сохраняет заявки в `data/vebora.db`. Публичный Worker использует Cloudflare D1.
+Русскоязычный сайт веб-студии, раздаваемый Cloudflare Worker из `public/`. Worker обрабатывает `/api/*`; заявки записываются в Cloudflare D1 (`vebora-leads`, binding `DB`). Vite приложение в `vebora/` — отдельная папка проекта и не является указанным production deploy target.
 
-## Настройка
+## Настройка сайта
 
-- Контакты, тексты цен и адрес API находятся в `config.js` (`window.VEBORA_CONFIG`). Пустые контакты оставлены пустыми: заполните только подтверждённые ссылки и адреса.
-- Стоимость тарифов по умолчанию показывается как «Стоимость по запросу».
-- Демонстрационные карточки портфолио — CSS-концепции, а не заявления о выполненных клиентских проектах.
-- Внешние ресурсы Bootstrap, Bootstrap Icons и Google Fonts подключаются по CDN.
+- `public/config.js`: проверенные контакты, данные концепций, `pricingUzs` и локаль. Цены задаются числом UZS или `null` для «Стоимость по запросу».
+- Все карточки портфолио помечены Concept / Demo. Ссылки Демо и Исходный код появляются только когда указаны настоящие HTTPS-URL.
+- Клиентские файлы содержат только публичные настройки; Telegram токен сюда добавлять нельзя.
+- Bootstrap, Bootstrap Icons и Google Fonts загружаются через CDN.
 
-## Форма
+## Форма и база
 
-Форма проверяет обязательные поля в браузере и повторно проверяет их в API. Локально заявки сохраняются в SQLite. Подготовленный Cloudflare Worker сохраняет их в D1 (`vebora-leads`, binding `DB`) после публикации Worker-кода. Успех показывается только после подтверждения записи. Worker и D1 настройки находятся в `src/worker.js` и `wrangler.jsonc`; статические файлы для Cloudflare собраны в `public/`. Контракт описан в [API_CONTRACT.md](API_CONTRACT.md).
+`POST /api/leads` валидирует данные, применяет honeypot, проверку минимального времени заполнения и ограничение частоты на экземпляр Worker, затем записывает в D1. Успех отправки показывается только после подтверждения записи. Ошибка Telegram-уведомления не отменяет запись и отражается отдельным статусом.
 
-Локальные заявки доступны в `data/vebora.db`. Облачные — в Cloudflare D1 → `vebora-leads` → Explore Data → таблица `leads`. Для Telegram уведомлений серверную интеграцию нужно настроить отдельно; контакты Telegram/Instagram/email задаются в `config.js`.
+Проверка базы: открыть `https://vebora1.vaismamatov.workers.dev/api/health` (ожидается `database: connected`) либо Cloudflare Dashboard → Storage & databases → D1 → `vebora-leads` → Explore Data → `leads`. Не отправляйте тестовую заявку с реальными персональными данными.
+
+## Telegram secrets
+
+Создайте Telegram бота через BotFather, получите chat ID личного чата или группы, затем задайте secrets из корня репозитория:
+
+```powershell
+npx wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put TELEGRAM_CHAT_ID
+```
+
+Worker использует их только на сервере. Для удаления уведомлений можно удалить secrets в Cloudflare Dashboard → Worker → Settings → Variables and Secrets.
+
+## Проверки и публикация
+
+```powershell
+npm run check
+npm test
+npx wrangler deploy
+```
+
+После деплоя проверьте главную страницу, `/api/health` и форму без отправки личных данных. В Cloudflare D1 заявки доступны в таблице `leads`.
 
 ## Структура
 
-- `index.html` — содержимое секций и семантическая разметка.
-- `styles.css` — палитра, компоненты, адаптивность и reduced motion.
-- `script.js` — меню, анимации, тарифы, валидация и запрос формы.
-- `config.js` — редактируемые контакты, цены и API endpoint.
-- `server.py` — локальный веб-сервер, API формы и схема SQLite.
-- `data/vebora.db` — база заявок, создаётся сервером автоматически.
-- `src/worker.js` — API формы для Cloudflare Worker.
-- `wrangler.jsonc` — привязки статических файлов и Cloudflare D1.
-- `migrations/0001_create_leads.sql` — версия схемы таблицы.
-- `public/` — копия frontend для Cloudflare deploy.
-
+- `public/index.html`, `styles.css`, `script.js`, `config.js`, `favicon.svg` — production frontend.
+- `src/worker.js` — Worker API и опциональное Telegram уведомление.
+- `migrations/0001_create_leads.sql` — схема таблицы D1.
+- `wrangler.jsonc` — Worker, assets и binding базы.
+- `tests/worker.test.js` — тесты Worker API.
