@@ -11,6 +11,17 @@ const MIN_FORM_AGE_MS = 2_500;
 const MAX_FORM_AGE_MS = 24 * 60 * 60 * 1000;
 const RATE_LIMIT = new Map();
 
+function telegramFailureCategory(status, description = "") {
+  const reason = description.toLowerCase();
+  if (status === 401) return "invalid_token";
+  if (status === 429) return "rate_limited";
+  if (status === 403 && (reason.includes("blocked") || reason.includes("initiate"))) return "start_bot_first";
+  if (status === 403) return "forbidden";
+  if (status === 400 && reason.includes("chat not found")) return "chat_not_found";
+  if (status >= 500) return "telegram_unavailable";
+  return "telegram_rejected";
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -114,6 +125,8 @@ async function submitLead(request, env, url) {
     ).run();
     if (!result.success) throw new Error("D1 did not confirm the insert");
     let notificationStatus = "not_configured";
+    let notificationError = null;
+    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) notificationError = "missing_secrets";
     if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
       try {
         const message = [
@@ -132,13 +145,23 @@ async function submitLead(request, env, url) {
           body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message }),
           signal: AbortSignal.timeout(5_000),
         });
-        notificationStatus = telegramResponse.ok ? "sent" : "failed";
-      } catch {
+        const telegramResult = await telegramResponse.json().catch(() => null);
+        if (telegramResponse.ok && telegramResult?.ok === true) {
+          notificationStatus = "sent";
+        } else {
+          notificationStatus = "failed";
+          const category = telegramFailureCategory(telegramResponse.status, telegramResult?.description);
+          console.warn("Telegram notification failed", { category, status: telegramResponse.status });
+          notificationError = category;
+        }
+      } catch (error) {
         notificationStatus = "failed";
+        notificationError = error?.name === "TimeoutError" || error?.name === "AbortError" ? "timeout" : "network_error";
+        console.warn("Telegram notification request failed", { category: notificationError });
       }
     }
     while (RATE_LIMIT.size > 5_000) RATE_LIMIT.delete(RATE_LIMIT.keys().next().value);
-    return json({ success: true, saved: true, id: result.meta?.last_row_id ?? null, notificationStatus }, 201);
+    return json({ success: true, saved: true, id: result.meta?.last_row_id ?? null, notificationStatus, notificationError }, 201);
   } catch {
     return json({ success: false, message: "Не удалось сохранить заявку. Попробуйте позже." }, 500);
   }

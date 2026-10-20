@@ -269,9 +269,25 @@
       if (result.notificationStatus === "sent") {
         status.textContent = "Заявка сохранена. Уведомление отправлено.";
       } else if (result.notificationStatus === "failed") {
-        status.textContent = "Заявка сохранена в базе, но уведомление не отправилось. Мы проверим контакт позже.";
+        const notificationHints = {
+          invalid_token: "Проверьте секрет TELEGRAM_BOT_TOKEN в настройках Worker.",
+          start_bot_first: "Откройте бота в Telegram и нажмите «Запустить» (/start), затем отправьте новую заявку.",
+          chat_not_found: "Проверьте TELEGRAM_CHAT_ID и убедитесь, что бот добавлен в этот чат.",
+          forbidden: "У бота нет доступа к выбранному чату. Проверьте его настройки и права.",
+          rate_limited: "Telegram временно ограничил отправку. Попробуйте позже.",
+          telegram_unavailable: "Telegram временно недоступен. Попробуйте позже.",
+          timeout: "Telegram не ответил вовремя. Попробуйте позже.",
+          network_error: "Worker не смог связаться с Telegram. Проверьте настройки интеграции.",
+          telegram_rejected: "Telegram отклонил сообщение. Проверьте настройки бота и чата."
+        };
+        const hint = notificationHints[result.notificationError];
+        status.textContent = hint
+          ? `Заявка сохранена в базе, но уведомление не отправлено. ${hint}`
+          : "Заявка сохранена в базе, но уведомление не отправлено. Проверьте настройки Telegram.";
       } else if (result.notificationStatus === "not_configured") {
-        status.textContent = "Заявка сохранена в базе. Уведомления Telegram пока не настроены.";
+        status.textContent = result.notificationError === "missing_secrets"
+          ? "Заявка сохранена в базе. Проверьте TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в настройках Worker."
+          : "Заявка сохранена в базе. Уведомления Telegram пока не настроены.";
       } else {
         status.textContent = "Заявка сохранена. Спасибо!";
       }

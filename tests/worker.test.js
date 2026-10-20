@@ -45,6 +45,7 @@ test("valid lead is inserted and response confirms database save", async () => {
   assert.equal(response.status, 201);
   assert.equal(result.saved, true);
   assert.equal(result.notificationStatus, "not_configured");
+  assert.equal(result.notificationError, "missing_secrets");
   assert.equal(inserted.length, 1);
 });
 
@@ -75,5 +76,17 @@ test("Telegram failure does not undo the saved lead", async (context) => {
   assert.equal(response.status, 201);
   assert.equal(result.saved, true);
   assert.equal(result.notificationStatus, "failed");
+  assert.equal(result.notificationError, "telegram_unavailable");
   assert.equal(inserted.length, 1);
+});
+
+test("Telegram explains that the bot must be started before it can message a user", async (context) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" }, { status: 403 });
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const { env } = environment({ telegram: true });
+  const response = await worker.fetch(leadRequest("198.51.100.37"), env);
+  const result = await response.json();
+  assert.equal(result.notificationStatus, "failed");
+  assert.equal(result.notificationError, "start_bot_first");
 });
